@@ -1,88 +1,184 @@
 #!/bin/bash
+# ↑ shebang: вказує системі, що файл треба виконувати через bash
 
 echo "=== Lesson 8: Bash Security Automation ==="
+# ↑ просто вивід заголовка в термінал
 
-# -----------------------------
-# 0. Перевірка root
-# -----------------------------
+# -------------------------------------------------
+# 0. ПЕРЕВІРКА ПРАВ ROOT
+# -------------------------------------------------
+
 if [ "$EUID" -ne 0 ]; then
-  echo "[!] Please run as root (use sudo)"
+# ↑ якщо Effective User ID не дорівнює 0 (тобто ми НЕ root)
+
+  echo "[!] Будь ласка, запускай скрипт через sudo"
+  # ↑ повідомляємо користувачу, що потрібні права root
+
   exit 1
+  # ↑ зупиняємо виконання скрипта, щоб нічого не ламати
 fi
+# ↑ кінець перевірки root
 
-# -----------------------------
-# 1. Password policy (minlen >= 8)
-# -----------------------------
-echo "[*] Checking password policy (minlen >= 8)"
+# -------------------------------------------------
+# 1. ПАРОЛЬНА ПОЛІТИКА (minlen >= 8)
+# -------------------------------------------------
 
-PASS_MINLEN=$(grep pam_unix.so /etc/pam.d/common-password | grep -o 'minlen=[0-9]*' | head -n 1 | cut -d= -f2)
+echo "[*] Перевірка мінімальної довжини пароля (minlen >= 8)"
+# ↑ інформаційне повідомлення
+
+PASS_MINLEN=$(grep pam_unix.so /etc/pam.d/common-password \
+# ↑ шукаємо рядок з pam_unix.so у файлі конфігурації паролів
+
+| grep -o 'minlen=[0-9]*' \
+# ↑ витягуємо ТІЛЬКИ параметр minlen=ЧИСЛО
+
+| head -n 1 \
+# ↑ беремо ТІЛЬКИ перше значення (на випадок дублювання)
+
+| cut -d= -f2)
+# ↑ відрізаємо "minlen=" і залишаємо тільки число
 
 if [ -z "$PASS_MINLEN" ]; then
-  echo "[!] minlen not set. Applying minlen=8"
-  sed -i '/pam_unix.so/ s/$/ minlen=8/' /etc/pam.d/common-password
-elif [ "$PASS_MINLEN" -lt 8 ]; then
-  echo "[!] minlen=$PASS_MINLEN is weak. Updating to minlen=8"
-  sed -i 's/minlen=[0-9]*/minlen=8/' /etc/pam.d/common-password
-else
-  echo "[+] Password policy OK (minlen=$PASS_MINLEN)"
-fi
+# ↑ якщо змінна порожня (minlen взагалі не заданий)
 
-# -----------------------------
-# 2. Firewall (UFW)
-# -----------------------------
-echo "[*] Checking firewall (UFW)"
+  echo "[!] minlen не задано. Встановлюємо minlen=8"
+  # ↑ повідомляємо, що виправляємо конфігурацію
+
+  sed -i '/pam_unix.so/ s/$/ minlen=8/' /etc/pam.d/common-password
+  # ↑ додаємо minlen=8 в кінець рядка pam_unix.so
+
+elif [ "$PASS_MINLEN" -lt 8 ]; then
+# ↑ якщо minlen заданий, але МЕНШЕ 8
+
+  echo "[!] minlen=$PASS_MINLEN — занадто слабкий. Оновлюємо до 8"
+  # ↑ повідомляємо про слабку політику
+
+  sed -i 's/minlen=[0-9]*/minlen=8/' /etc/pam.d/common-password
+  # ↑ замінюємо будь-яке значення minlen на 8
+
+else
+# ↑ якщо minlen >= 8
+
+  echo "[+] Парольна політика в нормі (minlen=$PASS_MINLEN)"
+  # ↑ підтвердження, що все добре
+
+fi
+# ↑ кінець перевірки парольної політики
+
+# -------------------------------------------------
+# 2. ФАЄРВОЛ (UFW)
+# -------------------------------------------------
+
+echo "[*] Перевірка фаєрволу UFW"
+# ↑ повідомлення користувачу
 
 if ! command -v ufw >/dev/null 2>&1; then
-  echo "[*] Installing UFW"
-  apt update && apt install ufw -y
+# ↑ перевіряємо, чи команда ufw існує в системі
+
+  echo "[!] UFW не встановлений. Встановлюємо..."
+  # ↑ повідомляємо про встановлення
+
+  apt update
+  # ↑ оновлюємо список пакетів
+
+  apt install ufw -y
+  # ↑ встановлюємо ufw без додаткових питань
+
 fi
+# ↑ кінець перевірки наявності ufw
 
 if ufw status | grep -qi inactive; then
-  echo "[!] UFW inactive. Enabling..."
-  ufw --force enable
-else
-  echo "[+] UFW already active"
-fi
+# ↑ перевіряємо, чи фаєрвол НЕАКТИВНИЙ
 
-# -----------------------------
-# 3. Disable root login via SSH
-# -----------------------------
-echo "[*] Disabling root login via SSH"
+  echo "[!] UFW вимкнений. Вмикаємо..."
+  # ↑ повідомлення
+
+  ufw --force enable
+  # ↑ вмикаємо фаєрвол без підтвердження
+
+else
+# ↑ якщо ufw уже активний
+
+  echo "[+] UFW уже активний"
+  # ↑ повідомлення
+
+fi
+# ↑ кінець блоку UFW
+
+# -------------------------------------------------
+# 3. ЗАБОРОНА ROOT LOGIN ЧЕРЕЗ SSH
+# -------------------------------------------------
+
+echo "[*] Забороняємо root login через SSH"
+# ↑ інформуємо, що налаштовуємо SSH
 
 SSHD_CONFIG="/etc/ssh/sshd_config"
+# ↑ шлях до конфігурації SSH-сервера
 
 if grep -q "^PermitRootLogin" "$SSHD_CONFIG"; then
+# ↑ якщо параметр PermitRootLogin уже існує
+
   sed -i 's/^PermitRootLogin.*/PermitRootLogin no/' "$SSHD_CONFIG"
+  # ↑ замінюємо будь-яке значення на "no"
+
 else
+# ↑ якщо параметра взагалі немає
+
   echo "PermitRootLogin no" >> "$SSHD_CONFIG"
+  # ↑ додаємо його в кінець файлу
+
 fi
+# ↑ кінець налаштування SSH
 
 systemctl restart ssh
-echo "[+] Root SSH login disabled"
+# ↑ перезапускаємо SSH, щоб зміни набули чинності
 
-# -----------------------------
-# 4. Automatic updates
-# -----------------------------
-echo "[*] Enabling automatic updates"
+echo "[+] Root login через SSH заборонений"
+# ↑ підтвердження
+
+# -------------------------------------------------
+# 4. АВТОМАТИЧНІ ОНОВЛЕННЯ
+# -------------------------------------------------
+
+echo "[*] Вмикаємо автоматичні оновлення"
+# ↑ повідомлення
 
 apt install unattended-upgrades -y
+# ↑ встановлюємо пакет автооновлень
+
 systemctl enable unattended-upgrades
+# ↑ вмикаємо сервіс при старті системи
+
 systemctl start unattended-upgrades
+# ↑ запускаємо сервіс одразу
 
-echo "[+] Automatic updates enabled"
+echo "[+] Автоматичні оновлення увімкнені"
+# ↑ підтвердження
 
-# -----------------------------
-# 5. Account lockout (fail after 5 attempts)
-# -----------------------------
-echo "[*] Configuring account lockout policy"
+# -------------------------------------------------
+# 5. БЛОКУВАННЯ ПІСЛЯ НЕВДАЛИХ ВХОДІВ
+# -------------------------------------------------
+
+echo "[*] Налаштовуємо блокування після 5 невдалих входів"
+# ↑ повідомлення
 
 PAM_FILE="/etc/pam.d/common-auth"
+# ↑ файл PAM-автентифікації
 
 if ! grep -q pam_faillock.so "$PAM_FILE"; then
+# ↑ якщо pam_faillock ще НЕ налаштований
+
   sed -i '1i auth required pam_faillock.so preauth deny=5 unlock_time=900' "$PAM_FILE"
+  # ↑ додаємо правило ДО перевірки пароля
+
   sed -i '/pam_unix.so/a auth [default=die] pam_faillock.so authfail deny=5 unlock_time=900' "$PAM_FILE"
+  # ↑ додаємо правило ПІСЛЯ невдалого пароля
+
 fi
+# ↑ кінець блоку fail-lock
 
-echo "[+] Account lockout configured (5 attempts)"
+echo "[+] Блокування після 5 спроб налаштоване"
+# ↑ підтвердження
 
-echo "=== CIS hardening completed successfully ==="
+echo "=== CIS hardening завершено успішно ==="
+# ↑ фінальне повідомлення
